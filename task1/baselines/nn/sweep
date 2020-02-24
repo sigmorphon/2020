@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -euo pipefail
+
+readonly EMBEDDING_DIMS=(64 128 256 512)
+readonly LAYER_DIMS=(128 256 512 1024)
+
+mkdir -p dev-scores
+
+for LANGUAGE in $(ls data-bin); do
+    # Encoder embedding layer.
+    for EED in "${EMBEDDING_DIMS[@]}"; do
+        # Encoding hidden layer.
+        for EHS in "${LAYER_DIMS[@]}"; do
+            # Decoder embedding layers.
+            for DED in "${EMBEDDING_DIMS[@]}"; do
+                # Decoder hidden layer.
+                for DHS in "${LAYER_DIMS[@]}"; do
+                    ./train-one \
+                        "${LANGUAGE}" "${EED}" "${EHS}" "${DED}" "${DHS}"
+                     STRING="${LANGUAGE}-${EED}-${EHS}-${DED}-${DHS}"
+                    ./evaluate-one-dev \
+                        "${LANGUAGE}" "${EED}" "${EHS}" "${DED}" "${DHS}" \
+                        > "dev-scores/scores-${STRING}"
+                done
+            done
+        done
+    done
+done
