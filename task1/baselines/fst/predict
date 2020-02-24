@@ -1,0 +1,71 @@
+#!/bin/bash
+# This script generates a TSV of predictions given a trained model. 
+#
+# In the first stage, it applies `cut -f1` to the list of input words so it
+# can be safely applied when the input file is itself a graphemic
+# form/phonemic form TSV file. In the second stage, it calls `predict.py`.
+
+set -eou pipefail
+
+# Flag parsing.
+
+readonly FLAGS=(
+    "fst_path"
+    "input_path"
+    "input_token_type"
+    "output_path"
+    "output_token_type"
+)
+readonly LONGOPTS_STRING="$(printf "%s:," "${FLAGS[@]}")"
+readonly OPTS=$(getopt                 \
+    --name "$(basename "$0")"          \
+    --options ""                       \
+    --longoptions "${LONGOPTS_STRING}" \
+    -- "$@")
+eval set --${OPTS}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --fst_path)
+            FST_PATH="$2"
+            shift 2
+            ;;
+        --input_path)
+            INPUT_PATH="$2"
+            shift 2
+            ;;
+        --input_token_type)
+            INPUT_TOKEN_TYPE="$2"
+            shift 2
+            ;;
+        --output_path)
+            OUTPUT_PATH="$2"
+            shift 2
+            ;;
+        --output_token_type)
+            OUTPUT_TOKEN_TYPE="$2"
+            shift 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Sets sensible default values.
+
+readonly INPUT_TOKEN_TYPE="${INPUT_TOKEN_TYPE:-utf8}"
+readonly OUTPUT_TOKEN_TYPE="${OUTPUT_TOKEN_TYPE:-utf8}"
+
+main() {
+    local -r WORDS_PATH="$(mktemp -u -t words.XXXXXX.$$.txt)"
+    cut -f1 "${INPUT_PATH}" > "${WORDS_PATH}"
+    ./predict.py                                   \
+        --fst_path="${FST_PATH}"                   \
+        --input_token_type="${INPUT_TOKEN_TYPE}"   \
+        --output_token_type="${OUTPUT_TOKEN_TYPE}" \
+        --word_path="${WORDS_PATH}"                \
+        > "${OUTPUT_PATH}"
+    rm -f "${WORDS_PATH}"
+}
+
+main

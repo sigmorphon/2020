@@ -1,0 +1,50 @@
+#!/bin/bash
+
+set -eou pipefail
+
+readonly SEED=212
+
+readonly DATA=../../data
+
+readonly RANDOM_STARTS=25
+
+mkdir -p dev-scores models
+
+for TRAIN_TSV in "${DATA}/train/"*"_train.tsv"; do
+    DEV_TSV="${TRAIN_TSV//train/dev}"
+    LANGUAGE="$(basename $TRAIN_TSV _train.tsv)"
+    # Output symbols.
+    cut -f2 "${TRAIN_TSV}" "${DEV_TSV}" \
+        | ngramsymbols \
+        > "${LANGUAGE}_phones.sym"
+    # Alignments.
+    ./align.py \
+        --seed="${SEED}" \
+        --random_starts="${RANDOM_STARTS}" \
+        --tsv_path="${TRAIN_TSV}" \
+        --output_token_type="${LANGUAGE}_phones.sym" \
+        --encoder_path="${LANGUAGE}.enc" \
+        --far_path="${LANGUAGE}.far"
+    # Loops over LM orders from 3 (trigram) to 9. 
+    for ORDER in $(seq 3 9); do
+        # NGram model.
+        ./model \
+            --encoder_path="${LANGUAGE}.enc" \
+            --far_path="${LANGUAGE}.far" \
+            --fst_path="models/${LANGUAGE}-${ORDER}.fst"
+        # Evaluation.
+        ./predict \
+            --input_path="${DEV_TSV}" \
+            --fst_path="models/${LANGUAGE}-${ORDER}.fst" \
+            --output_token_type="${LANGUAGE}_phones.sym" \
+            --output_path="${LANGUAGE}.txt"
+        ./evaluate \
+            --gold_path="${DEV_TSV}" \
+            --hypo_path="${LANGUAGE}.txt" \
+            > "dev-scores/${LANGUAGE}-${ORDER}.txt"
+    done
+    rm "${LANGUAGE}_phones.sym" \
+        "${LANGUAGE}.enc" \
+        "${LANGUAGE}.far" \
+        "${LANGUAGE}.txt"
+done

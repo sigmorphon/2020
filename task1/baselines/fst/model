@@ -1,0 +1,82 @@
+#!/bin/bash
+# This script takes an FAR of encoded alignments as input, builds a smoothed
+# and shrunk n-gram model, and decodes this model to produce the final WFST.
+
+set -eou pipefail
+
+# Flag parsing.
+
+readonly FLAGS=(
+    "encoder_path"
+    "far_path"
+    "fst_path"
+    "model_size"
+    "order"
+    "pruning_method"
+    "smoothing_method"
+)
+readonly LONGOPTS_STRING="$(printf "%s:," "${FLAGS[@]}")"
+readonly OPTS=$(getopt                 \
+    --name "$(basename "$0")"          \
+    --options ""                       \
+    --longoptions "${LONGOPTS_STRING}" \
+    -- "$@")
+eval set --${OPTS}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --encoder_path)
+            ENCODER_PATH="$2"
+            shift 2
+            ;;
+        --far_path)
+            FAR_PATH="$2"
+            shift 2
+            ;;
+        --fst_path)
+            FST_PATH="$2"
+            shift 2
+            ;;
+        --model_size)
+            MODEL_SIZE="$2"
+            shift 2
+            ;;
+        --order)
+            ORDER="$2"
+            shift 2
+            ;;
+        --pruning_method)
+            PRUNING_METHOD="$2"
+            shift 2
+            ;;
+        --smoothing_method)
+            SMOOTHING_METHOD="$2"
+            shift 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Sets sensible default values for those flags which have them.
+
+# One million n-grams.
+readonly MODEL_SIZE="${MODEL_SIZE:-1000000}"
+# 8th-order model (but higher-order models often work well).
+readonly ORDER="${ORDER:-8}"
+# The standard pruning method.
+readonly PRUNING_METHOD="${PRUNING_METHOD:-relative_entropy}"
+# Usually the best smoothing method for large-vocabulary models.
+readonly SMOOTHING_METHOD="${SMOOTHING_METHOD:-kneser_ney}"
+
+main() {
+    ngramcount --require_symbols=false --order="${ORDER}" "${FAR_PATH}" | \
+        ngrammake --method="${SMOOTHING_METHOD}" - | \
+        ngramshrink \
+            --method="${PRUNING_METHOD}" \
+            --target_number_of_ngrams="${MODEL_SIZE}" \
+            - | \
+        fstencode --decode - ${ENCODER_PATH} "${FST_PATH}"
+}
+
+main
