@@ -31,7 +31,8 @@ for TRAIN_TSV in "${DATA}/train/"*"_train.tsv"; do
         ./model \
             --encoder_path="${LANGUAGE}.enc" \
             --far_path="${LANGUAGE}.far" \
-            --fst_path="models/${LANGUAGE}-${ORDER}.fst"
+            --fst_path="models/${LANGUAGE}-${ORDER}.fst" \
+            --order="${ORDER}"
         # Evaluation.
         ./predict \
             --input_path="${DEV_TSV}" \
