@@ -1,2 +1,7 @@
 # 2020
-SIGMORPHON 2020 Shared Task: Grapheme-to-Phoneme (Task 1) and Unsupervised Induction of Morphology (Task 2).
+
+**SIGMORPHON 2020 Shared Tasks**
+
+- Task 0: Typologically Diverse Morphological Inflection
+- Task 1: Multilingual grapheme-to-phoneme
+- Task 2: Unsupervised induction of morphology
