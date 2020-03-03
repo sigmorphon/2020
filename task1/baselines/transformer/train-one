@@ -1,0 +1,62 @@
+#!/bin/bash
+
+set -euo pipefail
+
+readonly SEED=212
+readonly DATABIN=data-bin
+readonly CKPTS=checkpoints
+
+readonly LANGUAGE="$1"; shift
+# Encoder embedding dim.
+readonly EED="$1"; shift
+# Encoder hidden layer size.
+readonly EHS="$1"; shift
+# Encoder number of layers.
+readonly ENL="$1"; shift
+# Encoder number of attention heads.
+readonly EAH="$1"; shift
+# Decoder embedding dim.
+readonly DED="$1"; shift
+# Decoder hidden layer size.
+readonly DHS="$1"; shift
+# Decoder number of layers.
+readonly DNL="$1"; shift
+# Decoder number of attention heads.
+readonly DAH="$1"; shift
+# Dropout
+readonly DRP="$1"; shift
+
+fairseq-train "${DATABIN}/${LANGUAGE}" \
+    --task=translation \
+    --source-lang="${LANGUAGE}.graphemes" \
+    --target-lang="${LANGUAGE}.phonemes" \
+    --save-dir="${CKPTS}/${LANGUAGE}-${EED}-${EHS}-${ENL}-${EAH}-${DED}-${DHS}-${DNL}-${DAH}-${DRP}" \
+    --dropout="${DRP}" \
+    --attention-dropout="${DRP}" \
+    --activation-dropout="${DRP}" \
+    --arch=transformer \
+    --activation-fn=relu \
+    --encoder-embed-dim="${EED}" \
+    --encoder-ffn-embed-dim="${EHS}" \
+    --encoder-layers="${ENL}" \
+    --encoder-attention-heads="${EAH}" \
+    --encoder-normalize-before \
+    --decoder-embed-dim="${DED}" \
+    --decoder-ffn-embed-dim="${DHS}" \
+    --decoder-layers="${DNL}" \
+    --decoder-attention-heads="${DAH}" \
+    --decoder-normalize-before \
+    --share-decoder-input-output-embed \
+    --optimizer=adam \
+    --adam-betas='(0.9, 0.98)' \
+    --clip-norm=1.0 \
+    --lr=1e-3 \
+    --lr-scheduler=inverse_sqrt \
+    --warmup-updates=4000 \
+    --criterion=label_smoothed_cross_entropy \
+    --label-smoothing=0.1 \
+    --batch-size=400 \
+    --max-update=20000 \
+    --save-interval=50 \
+    --seed="${SEED}" \
+    "$@"  # In case we want to configure more from caller script.

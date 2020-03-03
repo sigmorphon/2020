@@ -1,0 +1,36 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Fairseq expects six files:
+# Two train, two dev, two test, each distinguished by prefixes.
+# One file is the source and one is the target, distinguished by suffixes.
+readonly DATA=../../data
+readonly DATABIN=data-bin
+readonly DATATXT=data-txt
+
+for TASK in train dev; do
+    for TSV in "${DATA}/${TASK}/"*"_${TASK}.tsv"; do
+        # Separate graphemes with spaces.
+        cut -d$'\t' -f1 "$TSV" | 
+            sed 's/./& /g' > "${TASK}".$(basename ${TSV%_${TASK}.tsv}).graphemes
+        # Phonemes are already separated intelligently in WikiPron.
+        cut -d$'\t' -f2 "$TSV" > "$TASK".$(basename ${TSV%_${TASK}.tsv}).phonemes
+    done
+done
+
+# Here we leave out test data because it's not provided yet.
+for DEVPATH in dev.*.graphemes; do  # e.g., dev.kor_phonetic.graphemes
+    LANGUAGE="$(echo $DEVPATH | cut -d'.' -f2)"
+    fairseq-preprocess \
+        --source-lang "${LANGUAGE}.graphemes" \
+        --target-lang "${LANGUAGE}.phonemes" \
+        --trainpref 'train' \
+        --validpref 'dev' \
+        --tokenizer space \
+        --destdir "${DATABIN}/${LANGUAGE}"
+done
+
+mkdir -p $DATATXT
+cp *.{graph,phon}emes $DATATXT
+rm *.{graph,phon}emes

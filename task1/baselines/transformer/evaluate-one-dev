@@ -1,0 +1,50 @@
+#!/bin/bash
+
+set -euo pipefail
+
+readonly DATABIN=data-bin
+readonly CKPTS=checkpoints
+
+readonly LANGUAGE="$1"; shift
+# Encoder embedding dim.
+readonly EED="$1"; shift
+# Encoder hidden layer size.
+readonly EHS="$1"; shift
+# Encoder number of layers.
+readonly ENL="$1"; shift
+# Encoder number of attention heads.
+readonly EAH="$1"; shift
+# Decoder embedding dim.
+readonly DED="$1"; shift
+# Decoder hidden layer size.
+readonly DHS="$1"; shift
+# Decoder number of layers.
+readonly DNL="$1"; shift
+# Decoder number of attention heads.
+readonly DAH="$1"; shift
+# Dropout
+readonly DRP="$1"; shift
+
+readonly STRING="${LANGUAGE}-${EED}-${EHS}-${ENL}-${EAH}-${DED}-${DHS}-${DNL}-${DAH}-${DRP}"
+readonly CHECKPOINT_DIR="${CKPTS}/${STRING}"
+readonly DEV="${CHECKPOINT_DIR}/dev"
+
+for MODEL in $(ls "${CHECKPOINT_DIR}"); do
+
+fairseq-generate \
+    "${DATABIN}/${LANGUAGE}" \
+    --gen-subset valid \
+    --source-lang "${LANGUAGE}.graphemes" \
+    --target-lang "${LANGUAGE}.phonemes" \
+    --path "${CHECKPOINT_DIR}/${MODEL}" \
+    --beam 5 \
+    > "${DEV}-${MODEL}.txt"
+
+paste \
+    <(cat "${DEV}-${MODEL}.txt" | grep '^T-' | cut -f2) \
+    <(cat "${DEV}-${MODEL}.txt" | grep '^H-' | cut -f3) \
+    > "${DEV}-${MODEL}.tsv"
+
+echo ${CHECKPOINT_DIR}/${MODEL} $(../../evaluation/evaluate.py "${DEV}-${MODEL}.tsv" 2>/dev/null | paste -sd ' ')
+
+done
