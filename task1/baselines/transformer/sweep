@@ -1,0 +1,39 @@
+#!/bin/bash
+
+set -euo pipefail
+
+readonly DATABIN=data-bin
+
+mkdir -p dev-scores
+
+for LANGUAGE in $(ls $DATABIN); do
+
+# Encoder embedding dim.
+EED=256
+# Encoder hidden layer size.
+EHS=1024
+# Encoder number of layers.
+ENL=4
+# Encoder number of attention heads.
+EAH=4
+# Decoder embedding dim.
+DED=256
+# Decoder hidden layer size.
+DHS=1024
+# Decoder number of layers.
+DNL=4
+# Decoder number of attention heads.
+DAH=4
+# Dropout
+DRP=0.3
+
+./train-one \
+    "${LANGUAGE}" "${EED}" "${EHS}" "${ENL}" "${EAH}" "${DED}" "${DHS}" "${DNL}" "${DAH}" "${DRP}"
+STRING="${LANGUAGE}-${EED}-${EHS}-${ENL}-${EAH}-${DED}-${DHS}-${DNL}-${DAH}-${DRP}"
+./evaluate-one-dev \
+    "${LANGUAGE}" "${EED}" "${EHS}" "${ENL}" "${EAH}" "${DED}" "${DHS}" "${DNL}" "${DAH}" "${DRP}" \
+    > "dev-scores/scores-${STRING}"
+# clean up checkpoints
+sort -nk3 "dev-scores/scores-${STRING}" | tail -n +2 | cut -d' ' -f1 | xargs rm
+
+done
