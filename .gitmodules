@@ -4,3 +4,6 @@
 [submodule "task0/baselines"]
 	path = task0/baselines
 	url = https://github.com/sigmorphon2020/task0-baselines.git
+[submodule "task2/baseline_and_eval"]
+	path = task2/baseline_and_eval
+	url = https://github.com/cai-lw/morpho-baseline.git
