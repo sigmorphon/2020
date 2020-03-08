@@ -1,29 +1,109 @@
 #!/bin/bash
+# Sweeps over languages and hyperparameters.
 
 set -euo pipefail
 
-readonly EMBEDDING_DIMS=(64 128 256 512)
-readonly LAYER_DIMS=(128 256 512 1024)
+# Training options (the ones not being tuned).
+readonly SEED=1917
+readonly CRITERION=label_smoothed_cross_entropy
+readonly LABEL_SMOOTHING=.1
+readonly OPTIMIZER=adam
+readonly LR=1e-3
+readonly CLIP_NORM=1.0
+readonly BATCH_SIZE=1028
+readonly MAX_EPOCHS=50
 
-mkdir -p dev-scores
+# Hyperparameters to be tuned.
+readonly DROPOUT_VALS=(0 .1 .2 .3)
+readonly EMBEDDING_DIMS=(128 256)
+readonly LAYER_DIMS=(512 1024)
 
-for LANGUAGE in $(ls data-bin); do
-    # Encoder embedding layer.
-    for EED in "${EMBEDDING_DIMS[@]}"; do
-        # Encoding hidden layer.
-        for EHS in "${LAYER_DIMS[@]}"; do
-            # Decoder embedding layers.
-            for DED in "${EMBEDDING_DIMS[@]}"; do
-                # Decoder hidden layer.
-                for DHS in "${LAYER_DIMS[@]}"; do
-                    ./train-one \
-                        "${LANGUAGE}" "${EED}" "${EHS}" "${DED}" "${DHS}"
-                     STRING="${LANGUAGE}-${EED}-${EHS}-${DED}-${DHS}"
-                    ./evaluate-one-dev \
-                        "${LANGUAGE}" "${EED}" "${EHS}" "${DED}" "${DHS}" \
-                        > "dev-scores/scores-${STRING}"
+# Prediction options
+readonly BEAM=5
+
+train() {
+    local -r CP="$1"; shift
+    fairseq-train \
+        "data-bin/${LANGUAGE}" \
+        --save-dir="${CP}" \
+        --source-lang="${LANGUAGE}.graphemes" \
+        --target-lang="${LANGUAGE}.phonemes" \
+        --seed="${SEED}" \
+        --arch=lstm \
+        --encoder-bidirectional \
+        --share-decoder-input-output-embed \
+        --dropout="${DROPOUT}" \
+        --encoder-embed-dim="${EED}" \
+        --encoder-hidden-size="${EHS}" \
+        --decoder-embed-dim="${DED}" \
+        --decoder-out-embed-dim="${DED}" \
+        --decoder-hidden-size="${DHS}" \
+        --criterion="${CRITERION}" \
+        --label-smoothing="${LABEL_SMOOTHING}" \
+        --optimizer="${OPTIMIZER}" \
+        --lr="${LR}" \
+        --clip-norm="${CLIP_NORM}" \
+        --max-sentences="${BATCH_SIZE}" \
+        --max-epoch="${MAX_EPOCHS}" \
+        "$@"   # In case we need more configuration control.
+}
+
+# Formats data for evaluation, and then invokes the script.
+# The second argument is "train", "dev", or "test".
+evaluate() {
+    local -r CP="$1"; shift
+    local -r MODE="$1"; shift
+    # We ignore the first few epochs, which are usually quite poor.
+    for EPOCH in $(seq 10 "${MAX_EPOCHS}"); do
+        RESULT="${CP}/${MODE}-${EPOCH}.res"
+        # Don't overwrite an existing prediction file.
+        if [[ -f "${RESULT}" ]]; then
+            break
+        fi
+        # Makes raw predictions.
+        fairseq-generate \
+            "data-bin/${LANGUAGE}" \
+            --source-lang="${LANGUAGE}.graphemes" \
+            --target-lang="${LANGUAGE}.phonemes" \
+            --path="${CP}/checkpoint${EPOCH}.pt" \
+            --seed="${SEED}" \
+            --gen-subset=valid \
+            --beam="${BEAM}" \
+            > "${CP}/${MODE}.out"
+        # Extracts the predictions into a TSV file.
+        paste \
+            <(cat "${CP}/${MODE}.out" | grep '^T-' | cut -f2) \
+            <(cat "${CP}/${MODE}.out" | grep '^H-' | cut -f3) \
+            > "${CP}/${MODE}.tsv"
+        # Applies the evaluation script to the TSV file.
+        ../../evaluation/evaluate.py \
+            "${CP}/${MODE}.tsv" \
+            > "${CP}/${MODE}-${EPOCH}.res" \
+            2>/dev/null
+    done
+    rm -f "${CP}/checkpoint_best.pt" "${CP}/${MODE}.out" "${CP}/${MODE}.tsv"
+}
+
+train_evaluate() {
+    local -r CP="$1"; shift
+    train "${CP}"
+    evaluate "${CP}" dev
+}
+
+main() {
+    for LANGUAGE in $(ls data-bin); do
+        for DROPOUT in "${DROPOUT_VALS[@]}"; do
+            for EED in "${EMBEDDING_DIMS[@]}"; do
+                for EHS in "${LAYER_DIMS[@]}"; do
+                    for DED in "${EMBEDDING_DIMS[@]}"; do
+                        for DHS in "${LAYER_DIMS[@]}"; do
+                            train_evaluate "checkpoints/${LANGUAGE}-${DROPOUT}-${EED}-${EHS}-${DED}-${DHS}"
+                        done
+                    done
                 done
             done
         done
     done
-done
+}
+
+main
