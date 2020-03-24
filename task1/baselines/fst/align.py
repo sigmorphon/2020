@@ -90,7 +90,7 @@ class PairNGramAligner:
         pywrapfst.convert, fst_type="compact_string"
     )
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.g_path = os.path.join(self.tempdir.name, "g.far")
         self.p_path = os.path.join(self.tempdir.name, "p.far")
@@ -98,7 +98,7 @@ class PairNGramAligner:
         self.align_path = os.path.join(self.tempdir.name, "align.fst")
         self.afst_path = os.path.join(self.tempdir.name, "afst.far")
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.tempdir.cleanup()
 
     def align(
@@ -121,7 +121,7 @@ class PairNGramAligner:
         fst_default_cache_gc: str = "",
         fst_default_cache_gc_limit: str = "",
         max_iters: str = "",
-    ):
+    ) -> None:
         """Runs the entire alignment regimen."""
         self._lexicon_covering(
             tsv_path,
