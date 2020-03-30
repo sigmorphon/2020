@@ -10,4 +10,4 @@ To run:
     [`README.md`](../../README.md)
 2.  Run [`sweep`](sweep). This may take a while.
 
-When the sweep is complete the results are stored in the [`dev-scores/`](dev-scores/) directory.
+Results are stored in the [`checkpoints`](checkpoints) directory.
