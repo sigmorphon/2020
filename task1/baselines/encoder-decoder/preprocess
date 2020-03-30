@@ -8,7 +8,7 @@ set -euo pipefail
 readonly DATA=../../data
 
 tsv() {
-    for TASK in train dev; do
+    for TASK in train dev test; do
         for TSV in "${DATA}/${TASK}/"*"_${TASK}.tsv"; do
             # Separates graphemes with spaces.
             cut -d$'\t' -f1 "${TSV}" | \
@@ -30,6 +30,7 @@ bin() {
             --target-lang="${LANGUAGE}.phonemes" \
             --trainpref=train \
             --validpref=dev \
+            --testpref=test \
             --tokenizer=space \
             --thresholdsrc=5 \
             --thresholdtgt=5 \

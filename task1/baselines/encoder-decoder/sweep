@@ -3,22 +3,22 @@
 
 set -euo pipefail
 
-# Training options (the ones not being tuned).
+# Defaults.
 readonly SEED=1917
 readonly CRITERION=label_smoothed_cross_entropy
 readonly LABEL_SMOOTHING=.1
 readonly OPTIMIZER=adam
 readonly LR=1e-3
-readonly CLIP_NORM=1.0
-readonly BATCH_SIZE=1028
+readonly CLIP_NORM=1.
+readonly BATCH_SIZE=128
 readonly MAX_EPOCHS=50
 
 # Hyperparameters to be tuned.
-readonly DROPOUT_VALS=(0 .1 .2 .3)
+readonly DROPOUT_VALS=(.0 .2)
 readonly EMBEDDING_DIMS=(128 256)
 readonly LAYER_DIMS=(512 1024)
 
-# Prediction options
+# Prediction options.
 readonly BEAM=5
 
 train() {
@@ -28,6 +28,7 @@ train() {
         --save-dir="${CP}" \
         --source-lang="${LANGUAGE}.graphemes" \
         --target-lang="${LANGUAGE}.phonemes" \
+        --disable-validation \
         --seed="${SEED}" \
         --arch=lstm \
         --encoder-bidirectional \
@@ -46,6 +47,10 @@ train() {
         --max-sentences="${BATCH_SIZE}" \
         --max-epoch="${MAX_EPOCHS}" \
         "$@"   # In case we need more configuration control.
+    # We throw out the first few epochs, which are usually quite poor.
+    for EPOCH in $(seq 1 9); do
+      rm -f "${CP}/checkpoint${EPOCH}.pt"
+    done
 }
 
 # Formats data for evaluation, and then invokes the script.
@@ -53,7 +58,13 @@ train() {
 evaluate() {
     local -r CP="$1"; shift
     local -r MODE="$1"; shift
-    # We ignore the first few epochs, which are usually quite poor.
+    # Fairseq insists on calling the dev-set valid". Okie zoomer.
+    local -r SUBSET="$(
+        if [[ "${MODE}" == dev ]]; then
+            echo valid
+        else
+            echo test
+        fi)"
     for EPOCH in $(seq 10 "${MAX_EPOCHS}"); do
         RESULT="${CP}/${MODE}-${EPOCH}.res"
         # Don't overwrite an existing prediction file.
@@ -67,7 +78,7 @@ evaluate() {
             --target-lang="${LANGUAGE}.phonemes" \
             --path="${CP}/checkpoint${EPOCH}.pt" \
             --seed="${SEED}" \
-            --gen-subset=valid \
+            --gen-subset="${SUBSET}" \
             --beam="${BEAM}" \
             > "${CP}/${MODE}.out"
         # Extracts the predictions into a TSV file.
@@ -80,14 +91,19 @@ evaluate() {
             "${CP}/${MODE}.tsv" \
             > "${CP}/${MODE}-${EPOCH}.res" \
             2>/dev/null
+        # Cleans up.
+        rm "${CP}/${MODE}.tsv" "${CP}/${MODE}.out"
     done
-    rm -f "${CP}/checkpoint_best.pt" "${CP}/${MODE}.out" "${CP}/${MODE}.tsv"
 }
 
 train_evaluate() {
     local -r CP="$1"; shift
     train "${CP}"
     evaluate "${CP}" dev
+    evaluate "${CP}" test
+    for EPOCH in $(seq 10 "${MAX_EPOCHS}"); do
+        rm -f "${CP}/checkpoint${EPOCH}.pt"
+    done
 }
 
 main() {
