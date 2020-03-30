@@ -10,4 +10,4 @@ To run:
 2.  Run [`preprocess`](preprocess).
 3.  Run [`sweep`](sweep). This may take a while.
 
-Results are stored in the [`checkpoints`](checkpoints) directories.
+Results are stored in the [`checkpoints`](checkpoints) directory.
