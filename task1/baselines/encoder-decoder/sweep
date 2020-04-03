@@ -44,7 +44,7 @@ train() {
         --optimizer="${OPTIMIZER}" \
         --lr="${LR}" \
         --clip-norm="${CLIP_NORM}" \
-        --max-sentences="${BATCH_SIZE}" \
+        --batch-size="${BATCH_SIZE}" \
         --max-epoch="${MAX_EPOCHS}" \
         "$@"   # In case we need more configuration control.
     # We throw out the first few epochs, which are usually quite poor.
