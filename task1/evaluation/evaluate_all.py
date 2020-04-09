@@ -1,5 +1,10 @@
-# evaluate_all.py
+#!/usr/bin/env python
+"""Evaluates sequence model.
 
+This script assumes the gold and hypothesis data is stored in a two-column TSV
+file, one example per line."""
+
+__author__ = "Aaron Goyzueta"
 
 import argparse
 import logging
@@ -36,12 +41,6 @@ def _edit_distance(x: Labels, y: Labels) -> int:
 def _score(gold: Labels, hypo: Labels) -> Tuple[int, int]:
     """Computes sufficient statistics for LER calculation."""
     edits = _edit_distance(gold, hypo)
-    if edits:
-        logging.warning(
-            "Incorrect prediction:\t%r (predicted: %r)",
-            " ".join(gold),
-            " ".join(hypo),
-        )
     return (edits, len(gold))
 
 
@@ -57,11 +56,8 @@ def _tsv_reader(path: str) -> Iterator[Tuple[Labels, Labels]]:
 
 
 def main(args: argparse.Namespace) -> None:
-
-    # Lists that hold WERs and LERs for every language.
-    wer_list = []
-    ler_list = []
-
+    wers = []
+    lers = []
     for tsv_path in args.tsv_paths:
         # Word-level measures.
         correct = 0
@@ -80,18 +76,13 @@ def main(args: argparse.Namespace) -> None:
                     incorrect += 1
                 total_edits += edits
                 total_length += length
-
         wer = 100 * incorrect / (correct + incorrect)
         ler = 100 * total_edits / total_length
-        wer_list.append(wer)
-        ler_list.append(ler)
-
-        print(f"Language {args.tsv_paths.index(tsv_path) + 1}")
-        print(f"WER:\t{wer:.2f}")
-        print(f"LER:\t{ler:.2f}")
-
-    print(f"Macro-average WER:\t{sum(wer_list)/len(wer_list):.2f}")
-    print(f"Macro-average LER:\t{sum(ler_list)/len(ler_list):.2f}")
+        wers.append(wer)
+        lers.append(ler)
+        print(f"{tsv_path}:\tWER:\t{wer:.2f}\tLER:\t{ler:.2f}")
+    print(f"Macro-average WER:\t{sum(wers)/len(wers):.2f}")
+    print(f"Macro-average LER:\t{sum(lers)/len(lers):.2f}")
 
 
 if __name__ == "__main__":
