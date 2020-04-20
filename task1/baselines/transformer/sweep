@@ -9,9 +9,13 @@ readonly CRITERION=label_smoothed_cross_entropy
 readonly LABEL_SMOOTHING=.1
 readonly OPTIMIZER=adam
 readonly LR=1e-3
+readonly LR_SCHEDULER=inverse_sqrt
+readonly WARMUP_INIT_LR=1e-7
+readonly WARMUP_UPDATES=4000
 readonly CLIP_NORM=1.
-readonly BATCH_SIZE=128
-readonly MAX_EPOCHS=50
+readonly MAX_EPOCH=400
+readonly MAX_UPDATE=5000
+readonly SAVE_INTERVAL=5
 readonly ENCODER_LAYERS=4
 readonly ENCODER_ATTENTION_HEADS=4
 readonly DECODER_LAYERS=4
@@ -19,9 +23,8 @@ readonly DECODER_ATTENTION_HEADS=4
 readonly ACTIVATION_FN=relu
 
 # Hyperparameters to be tuned.
-readonly DROPOUT_VALS=(.0 .2)
-readonly EMBEDDING_DIMS=(128 256)
-readonly LAYER_DIMS=(512 1024)
+readonly BATCHES=(256 512 1024)
+readonly DROPOUTS=(.1 .2 .3)
 
 # Prediction options.
 readonly BEAM=5
@@ -54,56 +57,51 @@ train() {
         --label-smoothing="${LABEL_SMOOTHING}" \
         --optimizer="${OPTIMIZER}" \
         --lr="${LR}" \
+        --lr-scheduler="${LR_SCHEDULER}" \
+        --warmup-init-lr="${WARMUP_INIT_LR}" \
+        --warmup-updates="${WARMUP_UPDATES}" \
         --clip-norm="${CLIP_NORM}" \
-        --max-sentences="${BATCH_SIZE}" \
-        --max-epoch="${MAX_EPOCHS}" \
+        --batch-size="${BATCH}" \
+        --max-epoch="${MAX_EPOCH}" \
+        --max-update="${MAX_UPDATE}" \
+        --save-interval="${SAVE_INTERVAL}" \
         "$@"   # In case we need more configuration control.
-    # We throw out the first few epochs, which are usually quite poor.
-    for EPOCH in $(seq 1 9); do
-      rm -f "${CP}/checkpoint${EPOCH}.pt"
-    done
 }
 
-# Formats data for evaluation, and then invokes the script.
-# The second argument must be either "dev", or "test".
 evaluate() {
     local -r CP="$1"; shift
     local -r MODE="$1"; shift
-    # Fairseq insists on calling the dev-set valid". Okie zoomer.
-    local -r SUBSET="$(
-        if [[ "${MODE}" == dev ]]; then
-            echo valid
-        else
-            echo test
-        fi)"
-    for EPOCH in $(seq 10 "${MAX_EPOCHS}"); do
-        RESULT="${CP}/${MODE}-${EPOCH}.res"
+    # Fairseq insists on calling the dev-set "valid"; hack around this.
+    local -r FAIRSEQ_MODE="${MODE/dev/valid}"
+    for CHECKPOINT in $(ls ${CP}/checkpoint[1-9]*.pt 2> /dev/null); do
+        RES="${CHECKPOINT/.pt/-${MODE}.res}"
         # Don't overwrite an existing prediction file.
-        if [[ -f "${RESULT}" ]]; then
+        if [[ -f "${RES}" ]]; then
             break
         fi
+        echo "Evaluating into ${RES}"
+        OUT="${CP}/${MODE}.out"
+        TSV="${CP}/${MODE}.tsv"
         # Makes raw predictions.
         fairseq-generate \
             "data-bin/${LANGUAGE}" \
             --source-lang="${LANGUAGE}.graphemes" \
             --target-lang="${LANGUAGE}.phonemes" \
-            --path="${CP}/checkpoint${EPOCH}.pt" \
+            --path="${CHECKPOINT}" \
             --seed="${SEED}" \
-            --gen-subset="${SUBSET}" \
+            --gen-subset="${FAIRSEQ_MODE}" \
             --beam="${BEAM}" \
-            > "${CP}/${MODE}.out"
+            --no-progress-bar \
+            > "${OUT}"
         # Extracts the predictions into a TSV file.
         paste \
-            <(cat "${CP}/${MODE}.out" | grep '^T-' | cut -f2) \
-            <(cat "${CP}/${MODE}.out" | grep '^H-' | cut -f3) \
-            > "${CP}/${MODE}.tsv"
+            <(cat "${OUT}" | grep '^T-' | cut -f2) \
+            <(cat "${OUT}" | grep '^H-' | cut -f3) \
+            > "${TSV}"
         # Applies the evaluation script to the TSV file.
-        ../../evaluation/./evaluate.py \
-            "${CP}/${MODE}.tsv" \
-            > "${CP}/${MODE}-${EPOCH}.res" \
-            2>/dev/null
-        # Cleans up.
-        rm -f "${CP}/${MODE}.tsv" "${CP}/${MODE}.out"
+        ../../evaluation/./evaluate.py "${TSV}" > "${RES}" 2> /dev/null
+        # Cleans up intermediate files.
+        rm -f "${OUT}" "${TSV}"
     done
 }
 
@@ -111,22 +109,43 @@ train_evaluate() {
     local -r CP="$1"; shift
     train "${CP}"
     evaluate "${CP}" dev
-    for EPOCH in $(seq 10 "${MAX_EPOCHS}"); do
-        rm -f "${CP}/checkpoint${EPOCH}.pt"
-    done
+    rm -f "${CP}"/checkpoint[1-9]*.pt
+}
+
+# These set the encoder and/or decoder size.
+
+small_encoder() {
+  export EED=128
+  export EHS=512
+}
+
+large_encoder() {
+  export EED=256
+  export EHS=1024
+}
+
+small_decoder() {
+  export DED=128
+  export DHS=512
+}
+
+large_decoder() {
+  export DED=256
+  export DHS=1024
 }
 
 main() {
     for LANGUAGE in $(ls data-bin); do
-        for DROPOUT in "${DROPOUT_VALS[@]}"; do
-            for EED in "${EMBEDDING_DIMS[@]}"; do
-                for EHS in "${LAYER_DIMS[@]}"; do
-                    for DED in "${EMBEDDING_DIMS[@]}"; do
-                        for DHS in "${LAYER_DIMS[@]}"; do
-                            train_evaluate "checkpoints/${LANGUAGE}-${DROPOUT}-${EED}-${EHS}-${DED}-${DHS}"
-                        done
-                    done
-                done
+        for BATCH in "${BATCHES[@]}"; do
+            for DROPOUT in "${DROPOUTS[@]}"; do
+                small_encoder; small_decoder
+                train_evaluate "checkpoints/${LANGUAGE}-${BATCH}-${DROPOUT}-s-s"
+                small_encoder; large_decoder
+                train_evaluate "checkpoints/${LANGUAGE}-${BATCH}-${DROPOUT}-s-l"
+                large_encoder; small_decoder
+                train_evaluate "checkpoints/${LANGUAGE}-${BATCH}-${DROPOUT}-l-s"
+                large_encoder; large_decoder
+                train_evaluate "checkpoints/${LANGUAGE}-${BATCH}-${DROPOUT}-l-l"
             done
         done
     done
