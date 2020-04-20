@@ -92,7 +92,6 @@ train_evaluate() {
     local -r CP="$1"; shift
     train "${CP}"
     evaluate "${CP}" dev
-    evaluate "${CP}" test
     rm -f "${CP}"/checkpoint[1-9]*.pt
 }
 
