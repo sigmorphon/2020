@@ -14,7 +14,7 @@ We initially provide data for 10 languages:
 9.  Lithuanian (`lit`)
 10. Modern Greek (`gre`)
 
-Update (2020-04-20) the surprise langauges are now announced. They are:
+**Update (2020-04-20)**: the surprise langauges are now announced. They are:
 
 1.  Adyghe (`ady`)
 2.  Dutch (`dut`)
