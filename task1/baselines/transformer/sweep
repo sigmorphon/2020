@@ -1,39 +1,135 @@
 #!/bin/bash
+# Sweeps over data and hyperparameters.
 
 set -euo pipefail
 
-readonly DATABIN=data-bin
+# Defaults.
+readonly SEED=1917
+readonly CRITERION=label_smoothed_cross_entropy
+readonly LABEL_SMOOTHING=.1
+readonly OPTIMIZER=adam
+readonly LR=1e-3
+readonly CLIP_NORM=1.
+readonly BATCH_SIZE=128
+readonly MAX_EPOCHS=50
+readonly ENCODER_LAYERS=4
+readonly ENCODER_ATTENTION_HEADS=4
+readonly DECODER_LAYERS=4
+readonly DECODER_ATTENTION_HEADS=4
+readonly ACTIVATION_FN=relu
 
-mkdir -p dev-scores
+# Hyperparameters to be tuned.
+readonly DROPOUT_VALS=(.0 .2)
+readonly EMBEDDING_DIMS=(128 256)
+readonly LAYER_DIMS=(512 1024)
 
-for LANGUAGE in $(ls $DATABIN); do
+# Prediction options.
+readonly BEAM=5
 
-# Encoder embedding dim.
-EED=256
-# Encoder hidden layer size.
-EHS=1024
-# Encoder number of layers.
-ENL=4
-# Encoder number of attention heads.
-EAH=4
-# Decoder embedding dim.
-DED=256
-# Decoder hidden layer size.
-DHS=1024
-# Decoder number of layers.
-DNL=4
-# Decoder number of attention heads.
-DAH=4
-# Dropout
-DRP=0.3
+train() {
+    local -r CP="$1"; shift
+    fairseq-train \
+        "data-bin/${LANGUAGE}" \
+        --save-dir="${CP}" \
+        --source-lang="${LANGUAGE}.graphemes" \
+        --target-lang="${LANGUAGE}.phonemes" \
+        --disable-validation \
+        --seed="${SEED}" \
+        --arch=transformer \
+        --attention-dropout="${DROPOUT}" \
+        --activation-dropout="${DROPOUT}" \
+        --activation-fn="${ACTIVATION_FN}" \
+        --encoder-embed-dim="${EED}" \
+        --encoder-ffn-embed-dim="${EHS}" \
+        --encoder-layers="${ENCODER_LAYERS}" \
+        --encoder-attention-heads="${ENCODER_ATTENTION_HEADS}" \
+        --encoder-normalize-before \
+        --decoder-embed-dim="${DED}" \
+        --decoder-ffn-embed-dim="${DHS}" \
+        --decoder-layers="${DECODER_LAYERS}" \
+        --decoder-attention-heads="${DECODER_ATTENTION_HEADS}" \
+        --decoder-normalize-before \
+        --share-decoder-input-output-embed \
+        --criterion="${CRITERION}" \
+        --label-smoothing="${LABEL_SMOOTHING}" \
+        --optimizer="${OPTIMIZER}" \
+        --lr="${LR}" \
+        --clip-norm="${CLIP_NORM}" \
+        --max-sentences="${BATCH_SIZE}" \
+        --max-epoch="${MAX_EPOCHS}" \
+        "$@"   # In case we need more configuration control.
+    # We throw out the first few epochs, which are usually quite poor.
+    for EPOCH in $(seq 1 9); do
+      rm -f "${CP}/checkpoint${EPOCH}.pt"
+    done
+}
 
-./train-one \
-    "${LANGUAGE}" "${EED}" "${EHS}" "${ENL}" "${EAH}" "${DED}" "${DHS}" "${DNL}" "${DAH}" "${DRP}"
-STRING="${LANGUAGE}-${EED}-${EHS}-${ENL}-${EAH}-${DED}-${DHS}-${DNL}-${DAH}-${DRP}"
-./evaluate-one-dev \
-    "${LANGUAGE}" "${EED}" "${EHS}" "${ENL}" "${EAH}" "${DED}" "${DHS}" "${DNL}" "${DAH}" "${DRP}" \
-    > "dev-scores/scores-${STRING}"
-# clean up checkpoints
-sort -nk3 "dev-scores/scores-${STRING}" | tail -n +2 | cut -d' ' -f1 | xargs rm
+# Formats data for evaluation, and then invokes the script.
+# The second argument must be either "dev", or "test".
+evaluate() {
+    local -r CP="$1"; shift
+    local -r MODE="$1"; shift
+    # Fairseq insists on calling the dev-set valid". Okie zoomer.
+    local -r SUBSET="$(
+        if [[ "${MODE}" == dev ]]; then
+            echo valid
+        else
+            echo test
+        fi)"
+    for EPOCH in $(seq 10 "${MAX_EPOCHS}"); do
+        RESULT="${CP}/${MODE}-${EPOCH}.res"
+        # Don't overwrite an existing prediction file.
+        if [[ -f "${RESULT}" ]]; then
+            break
+        fi
+        # Makes raw predictions.
+        fairseq-generate \
+            "data-bin/${LANGUAGE}" \
+            --source-lang="${LANGUAGE}.graphemes" \
+            --target-lang="${LANGUAGE}.phonemes" \
+            --path="${CP}/checkpoint${EPOCH}.pt" \
+            --seed="${SEED}" \
+            --gen-subset="${SUBSET}" \
+            --beam="${BEAM}" \
+            > "${CP}/${MODE}.out"
+        # Extracts the predictions into a TSV file.
+        paste \
+            <(cat "${CP}/${MODE}.out" | grep '^T-' | cut -f2) \
+            <(cat "${CP}/${MODE}.out" | grep '^H-' | cut -f3) \
+            > "${CP}/${MODE}.tsv"
+        # Applies the evaluation script to the TSV file.
+        ../../evaluation/./evaluate.py \
+            "${CP}/${MODE}.tsv" \
+            > "${CP}/${MODE}-${EPOCH}.res" \
+            2>/dev/null
+        # Cleans up.
+        rm -f "${CP}/${MODE}.tsv" "${CP}/${MODE}.out"
+    done
+}
 
-done
+train_evaluate() {
+    local -r CP="$1"; shift
+    train "${CP}"
+    evaluate "${CP}" dev
+    for EPOCH in $(seq 10 "${MAX_EPOCHS}"); do
+        rm -f "${CP}/checkpoint${EPOCH}.pt"
+    done
+}
+
+main() {
+    for LANGUAGE in $(ls data-bin); do
+        for DROPOUT in "${DROPOUT_VALS[@]}"; do
+            for EED in "${EMBEDDING_DIMS[@]}"; do
+                for EHS in "${LAYER_DIMS[@]}"; do
+                    for DED in "${EMBEDDING_DIMS[@]}"; do
+                        for DHS in "${LAYER_DIMS[@]}"; do
+                            train_evaluate "checkpoints/${LANGUAGE}-${DROPOUT}-${EED}-${EHS}-${DED}-${DHS}"
+                        done
+                    done
+                done
+            done
+        done
+    done
+}
+
+main

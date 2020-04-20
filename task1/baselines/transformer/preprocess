@@ -11,11 +11,11 @@ tsv() {
     for TASK in train dev; do
         for TSV in "${DATA}/${TASK}/"*"_${TASK}.tsv"; do
             # Separates graphemes with spaces.
-            cut -d$'\t' -f1 "${TSV}" | \
+            cut -f1 "${TSV}" | \
                 sed 's/./& /g' \
                 > "${TASK}".$(basename ${TSV%_${TASK}.tsv}).graphemes
             # Phonemes are already separated intelligently in WikiPron.
-            cut -d$'\t' -f2 "${TSV}" \
+            cut -f2 "${TSV}" \
                 > "${TASK}.$(basename ${TSV%_${TASK}.tsv}).phonemes"
         done
     done
