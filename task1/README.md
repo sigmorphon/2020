@@ -14,8 +14,20 @@ We initially provide data for 10 languages:
 9.  Lithuanian (`lit`)
 10. Modern Greek (`gre`)
 
-We will announce an additional 5 "surprise languages" just before the conclusion
-of the task.
+**Update (2020-04-20)**: the surprise langauges are now announced. They are:
+
+1.  Adyghe (`ady`)
+2.  Dutch (`dut`)
+3.  Japanese hiragana (`jpn`)
+4.  Romanian (`rum`)
+5.  Vietnamese (`vie`)
+
+Baseline results
+================
+
+Results for the three baselines will be made available
+[here](https://docs.google.com/spreadsheets/d/1g0HyGeVzFrNt2pvNuu8L1voFFQY-0CwjTxGA3VXXNGI/edit?usp=sharing)
+as they become available.
 
 Using the baselines
 ===================

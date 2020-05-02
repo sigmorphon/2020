@@ -81,8 +81,8 @@ def main(args: argparse.Namespace) -> None:
         wers.append(wer)
         lers.append(ler)
         print(f"{tsv_path}:\tWER:\t{wer:.2f}\tLER:\t{ler:.2f}")
-    print(f"Macro-average WER:\t{sum(wers)/len(wers):.2f}")
-    print(f"Macro-average LER:\t{sum(lers)/len(lers):.2f}")
+    print(f"Macro-average WER:\t{sum(wers) / len(wers):.2f}")
+    print(f"Macro-average LER:\t{sum(lers) / len(lers):.2f}")
 
 
 if __name__ == "__main__":

@@ -2,13 +2,11 @@
 
 set -eou pipefail
 
-readonly SEED=212
-
+readonly SEED=1917
 readonly DATA=../../data
-
 readonly RANDOM_STARTS=25
 
-mkdir -p dev-scores models
+mkdir -p checkpoints
 
 for TRAIN_TSV in "${DATA}/train/"*"_train.tsv"; do
     DEV_TSV="${TRAIN_TSV//train/dev}"
@@ -31,18 +29,18 @@ for TRAIN_TSV in "${DATA}/train/"*"_train.tsv"; do
         ./model \
             --encoder_path="${LANGUAGE}.enc" \
             --far_path="${LANGUAGE}.far" \
-            --fst_path="models/${LANGUAGE}-${ORDER}.fst" \
+            --fst_path="checkpoints/${LANGUAGE}-${ORDER}.fst" \
             --order="${ORDER}"
         # Evaluation.
         ./predict \
             --input_path="${DEV_TSV}" \
-            --fst_path="models/${LANGUAGE}-${ORDER}.fst" \
+            --fst_path="checkpoints/${LANGUAGE}-${ORDER}.fst" \
             --output_token_type="${LANGUAGE}_phones.sym" \
             --output_path="${LANGUAGE}.txt"
         ./evaluate \
             --gold_path="${DEV_TSV}" \
             --hypo_path="${LANGUAGE}.txt" \
-            > "dev-scores/${LANGUAGE}-${ORDER}.txt"
+            > "checkpoints/${LANGUAGE}-${ORDER}-dev.res"
     done
     rm "${LANGUAGE}_phones.sym" \
         "${LANGUAGE}.enc" \
