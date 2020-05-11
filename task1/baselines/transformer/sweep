@@ -11,9 +11,8 @@ readonly OPTIMIZER=adam
 readonly LR=1e-3
 readonly LR_SCHEDULER=inverse_sqrt
 readonly WARMUP_INIT_LR=1e-7
-readonly WARMUP_UPDATES=4000
+readonly WARMUP_UPDATES=1000
 readonly CLIP_NORM=1.
-readonly MAX_EPOCH=400
 readonly MAX_UPDATE=5000
 readonly SAVE_INTERVAL=5
 readonly ENCODER_LAYERS=4
@@ -62,7 +61,6 @@ train() {
         --warmup-updates="${WARMUP_UPDATES}" \
         --clip-norm="${CLIP_NORM}" \
         --batch-size="${BATCH}" \
-        --max-epoch="${MAX_EPOCH}" \
         --max-update="${MAX_UPDATE}" \
         --save-interval="${SAVE_INTERVAL}" \
         "$@"   # In case we need more configuration control.
@@ -77,7 +75,7 @@ evaluate() {
         RES="${CHECKPOINT/.pt/-${MODE}.res}"
         # Don't overwrite an existing prediction file.
         if [[ -f "${RES}" ]]; then
-            break
+            continue
         fi
         echo "Evaluating into ${RES}"
         OUT="${CP}/${MODE}.out"
@@ -109,7 +107,7 @@ train_evaluate() {
     local -r CP="$1"; shift
     train "${CP}"
     evaluate "${CP}" dev
-    rm -f "${CP}"/checkpoint[1-9]*.pt
+    evaluate "${CP}" test
 }
 
 # These set the encoder and/or decoder size.

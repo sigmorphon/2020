@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sweeps over languages and hyperparameters.
+# Sweeps over data and hyperparameters.
 
 set -euo pipefail
 
@@ -10,8 +10,7 @@ readonly LABEL_SMOOTHING=.1
 readonly OPTIMIZER=adam
 readonly LR=1e-3
 readonly CLIP_NORM=1.
-readonly MAX_EPOCH=400
-readonly MAX_UPDATE=5000
+readonly MAX_UPDATE=4000
 readonly SAVE_INTERVAL=5
 
 # Hyperparameters to be tuned.
@@ -32,20 +31,19 @@ train() {
         --seed="${SEED}" \
         --arch=lstm \
         --encoder-bidirectional \
-        --share-decoder-input-output-embed \
         --dropout="${DROPOUT}" \
         --encoder-embed-dim="${EED}" \
         --encoder-hidden-size="${EHS}" \
         --decoder-embed-dim="${DED}" \
         --decoder-out-embed-dim="${DED}" \
         --decoder-hidden-size="${DHS}" \
+        --share-decoder-input-output-embed \
         --criterion="${CRITERION}" \
         --label-smoothing="${LABEL_SMOOTHING}" \
         --optimizer="${OPTIMIZER}" \
         --lr="${LR}" \
         --clip-norm="${CLIP_NORM}" \
         --batch-size="${BATCH}" \
-        --max-epoch="${MAX_EPOCH}" \
         --max-update="${MAX_UPDATE}" \
         --save-interval="${SAVE_INTERVAL}" \
         "$@"   # In case we need more configuration control.
@@ -60,7 +58,7 @@ evaluate() {
         RES="${CHECKPOINT/.pt/-${MODE}.res}"
         # Don't overwrite an existing prediction file.
         if [[ -f "${RES}" ]]; then
-            break
+            continue
         fi
         echo "Evaluating into ${RES}"
         OUT="${CP}/${MODE}.out"
@@ -92,6 +90,7 @@ train_evaluate() {
     local -r CP="$1"; shift
     train "${CP}"
     evaluate "${CP}" dev
+    evaluate "${CP}" test
     rm -f "${CP}"/checkpoint[1-9]*.pt
 }
 
