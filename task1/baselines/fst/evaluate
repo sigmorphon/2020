@@ -38,7 +38,7 @@ done
 
 main() {
     local -r EVALUATE_PATH="$(mktemp -u -t evaluate.XXXXXX.$$.tsv)"
-    paste <(cut -f2 ${GOLD_PATH}) ${HYPO_PATH} > "${EVALUATE_PATH}"
+    paste <(cut -f2 ${GOLD_PATH}) <(cut -f2 ${HYPO_PATH}) > "${EVALUATE_PATH}"
     # We hide the "incorrect predictions" logging.
     ../../evaluation/./evaluate.py "${EVALUATE_PATH}" 2>/dev/null
     rm -f "${EVALUATE_PATH}"

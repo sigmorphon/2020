@@ -17,10 +17,10 @@ covering grammar FST.
 
 In stage two (_alignments), we set the covering grammar probabilities using
 expectation maximization, then decodes the training corpus using this model.
-This requires the command-line tools `baumwelchtrain` and `baumwelchdecode`
-available here:
+This requires the command-line tools `baumwelchrandomize`, `baumwelchtrain`,
+and `baumwelchdecode`, available here:
 
-    http://www.openfst.org/twiki/pub/Contrib/FstContrib/baumwelch-0.3.0.tar.gz
+    http://baumwelch.opengrm.org
 
 In stage three (_encode), we finally encode the alignment FSTs as FSAs. This
 allows us to construct n-gram models over the pairs using the OpenGrm-NGram
@@ -59,13 +59,11 @@ import random
 import re
 import time
 
-from typing import Set, Tuple, Union
+from typing import List, NamedTuple, Optional, Set, Tuple
 
 import pynini
 import pywrapfst
 
-
-TokenType = Union[str, pynini.SymbolTable]
 
 TOKEN_TYPES = ["byte", "utf8"]
 DEV_NULL = open(os.devnull, "w")
@@ -81,6 +79,17 @@ def _str_to_bool(value: str) -> bool:
     elif value in ("false", "0"):
         return False
     raise argparse.ArgumentTypeError(f"Boolean value expected; got {value}")
+
+
+class RandomStart(NamedTuple):
+
+    idx: int
+    seed: int
+    g_path: str
+    p_path: str
+    c_path: str
+    tempdir: str
+    train_opts: List[str]
 
 
 class PairNGramAligner:
@@ -109,18 +118,20 @@ class PairNGramAligner:
         far_path: str,
         encoder_path: str,
         # Arguments for constructing the lexicon and covering grammar.
-        input_token_type: TokenType,
+        input_token_type: pynini.TokenType,
         input_epsilon: bool,
-        output_token_type: TokenType,
+        output_token_type: pynini.TokenType,
         output_epsilon: bool,
         # Arguments used during the alignment phase.
         cores: int,
         random_starts: int,
         seed: int,
-        delta: str = "",
+        batch_size: int = 0,
+        delta: float = 1 / 1024,
+        lr: float = 1.0,
+        max_iters: int = 50,
         fst_default_cache_gc: str = "",
         fst_default_cache_gc_limit: str = "",
-        max_iters: str = "",
     ) -> None:
         """Runs the entire alignment regimen."""
         self._lexicon_covering(
@@ -134,10 +145,12 @@ class PairNGramAligner:
             cores,
             random_starts,
             seed,
+            batch_size,
             delta,
+            lr,
+            max_iters,
             fst_default_cache_gc,
             fst_default_cache_gc_limit,
-            max_iters,
         )
         self._encode(far_path, encoder_path)
         logging.info(
@@ -153,7 +166,7 @@ class PairNGramAligner:
         dst = side.add_state()
         if epsilon:
             labels.add(0)
-        one = pynini.Weight.One(side.weight_type())
+        one = pynini.Weight.one(side.weight_type())
         for label in labels:
             side.add_arc(src, pynini.Arc(label, label, one, dst))
         side.set_final(dst)
@@ -170,22 +183,15 @@ class PairNGramAligner:
     def _lexicon_covering(
         self,
         tsv_path: str,
-        input_token_type: TokenType,
+        input_token_type: pynini.TokenType,
         input_epsilon: bool,
-        output_token_type: TokenType,
+        output_token_type: pynini.TokenType,
         output_epsilon: bool,
     ) -> None:
         """Builds covering grammar and lexicon FARs."""
         # Sets of labels for the covering grammar.
         g_labels: Set[int] = set()
         p_labels: Set[int] = set()
-        # Curries compiler functions for the FARs.
-        icompiler = functools.partial(
-            pynini.acceptor, token_type=input_token_type
-        )
-        ocompiler = functools.partial(
-            pynini.acceptor, token_type=output_token_type
-        )
         logging.info("Constructing grapheme and phoneme FARs")
         g_writer = pywrapfst.FarWriter.create(self.g_path)
         p_writer = pywrapfst.FarWriter.create(self.p_path)
@@ -195,10 +201,10 @@ class PairNGramAligner:
                 (g, p) = line.rstrip().split("\t", 1)
                 # For both G and P, we compile a FSA, store the labels, and
                 # then write the compact version to the FAR.
-                g_fst = icompiler(g)
+                g_fst = pynini.accep(g, token_type=input_token_type)
                 g_labels.update(g_fst.paths().ilabels())
                 g_writer[key] = self._compactor(g_fst)
-                p_fst = ocompiler(p)
+                p_fst = pynini.accep(p, token_type=output_token_type)
                 p_labels.update(p_fst.paths().ilabels())
                 p_writer[key] = self._compactor(p_fst)
         logging.info("Processed %s examples", f"{linenum:,d}")
@@ -208,7 +214,7 @@ class PairNGramAligner:
         logging.info("%d unique phones", len(p_labels))
         p_side = self._label_union(p_labels, output_epsilon)
         # The covering grammar is given by (G x P)^*.
-        covering = pynini.transducer(g_side, p_side).closure().optimize()
+        covering = pynini.cross(g_side, p_side).closure().optimize()
         assert covering.num_states() == 1, "Covering grammar FST is ill-formed"
         logging.info(
             "Covering grammar has %s arcs",
@@ -217,80 +223,101 @@ class PairNGramAligner:
         covering.write(self.c_path)
 
     @staticmethod
-    def _random_start(*args: str) -> Tuple[str, float]:
+    def _random_start(random_start: RandomStart) -> Tuple[str, float]:
         """Performs a single random start."""
-        (*cmd, idx) = args
         start = time.time()
+        # Randomize channel model.
+        c_path = os.path.join(
+            random_start.tempdir, f"c-{random_start.seed:05d}.fst"
+        )
+        cmd = [
+            "baumwelchrandomize",
+            f"--seed={random_start.seed}",
+            random_start.c_path,
+            c_path,
+        ]
+        logging.debug("Subprocess call: %s", cmd)
+        subprocess.check_call(cmd)
+        # Train on randomized channel model.
         likelihood = INF
+        t_path = os.path.join(
+            random_start.tempdir, f"t-{random_start.seed:05d}.fst"
+        )
+        cmd = [
+            "baumwelchtrain",
+            *random_start.train_opts,
+            random_start.g_path,
+            random_start.p_path,
+            c_path,
+            t_path,
+        ]
         logging.debug("Subprocess call: %s", cmd)
         with subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True) as proc:
             # Parses STDERR to capture the likelihood.
-            for line in proc.stderr:
-                match = re.match(
-                    r"INFO: Best likelihood:\s(-?\d*(\.\d*))", line
-                )
-                if match:
-                    likelihood = float(match.group(1))
-                    logging.info(
-                        "Random start %d; likelihood: %f; time elapsed: %ds",
-                        idx,
-                        likelihood,
-                        time.time() - start,
-                    )
-        return (cmd[-1], likelihood)
+            for line in proc.stderr:  # type: ignore
+                line = line.rstrip()
+                match = re.match(r"INFO: Iteration \d+: (-?\d*(\.\d*)?)", line)
+                assert match, line
+                likelihood = float(match.group(1))
+        logging.info(
+            "Random start %d; likelihood: %f; time elapsed: %ds",
+            random_start.idx,
+            likelihood,
+            time.time() - start,
+        )
+        return (t_path, likelihood)
 
     def _alignments(
         self,
         cores: int,
         random_starts: int,
         seed: int,
-        delta: str = "",
+        batch_size: Optional[int] = None,
+        delta: Optional[float] = None,
+        lr: Optional[float] = None,
+        max_iters: Optional[int] = None,
         fst_default_cache_gc: str = "",
         fst_default_cache_gc_limit: str = "",
-        max_iters: str = "",
     ) -> None:
         """Trains the aligner and constructs the alignments FAR."""
         logging.info("Training aligner")
-        cmd_fixed = ["baumwelchtrain", "--expectation_table=ilabel"]
+        train_opts = []
+        if batch_size:
+            train_opts.append(f"--batch_size={batch_size}")
         if delta:
-            cmd_fixed.append(f"--delta={delta}")
+            train_opts.append(f"--delta={delta}")
         if fst_default_cache_gc:
-            cmd_fixed.append(f"--fst_default_cache_gc={fst_default_cache_gc}")
+            train_opts.append(f"--fst_default_cache_gc={fst_default_cache_gc}")
         if fst_default_cache_gc_limit:
-            cmd_fixed.append(
+            train_opts.append(
                 f"--fst_default_cache_gc_limit={fst_default_cache_gc_limit}"
             )
+        if lr:
+            train_opts.append(f"--lr={lr}")
         if max_iters:
-            cmd_fixed.append(f"--max_iters={max_iters}")
-        # Adds more arguments shared across all commands.
-        if max_iters:
-            cmd_fixed.append(f"--max_iters={max_iters}")
-        cmd_fixed.append("--remove_zero_arcs=false")
-        cmd_fixed.append("--flat_start=false")
-        cmd_fixed.append("--random_starts=1")
-        # Constructs the actual command vectors (plus an index for logging
-        # purposes).
+            train_opts.append(f"--max_iters={max_iters}")
+        # Each trial is defined by a random seed and an index.
         random.seed(seed)
-        commands = [
-            (
-                *cmd_fixed,
-                f"--seed={seed}",
+        starts = [
+            RandomStart(
+                idx,
+                seed,
                 self.g_path,
                 self.p_path,
                 self.c_path,
-                os.path.join(self.tempdir.name, f"{seed:010d}.fst"),
-                idx,
+                self.tempdir.name,
+                train_opts,
             )
             for (idx, seed) in enumerate(
                 random.sample(range(1, RAND_MAX), random_starts), 1
             )
         ]
-        # Actually runs starts.
-        logging.info("Random starts")
+        # Actually run.
+        logging.info("Beginning random starts")
         with multiprocessing.Pool(cores) as pool:
             # Setting chunksize to 1 means that random starts are processed
             # in roughly the order you'd expect.
-            gen = pool.starmap(self._random_start, commands, chunksize=1)
+            gen = pool.map(self._random_start, starts, chunksize=1)
             # Because we're in negative log space.
             (best_fst, best_likelihood) = min(gen, key=operator.itemgetter(1))
         logging.info("Best likelihood: %f", best_likelihood)
@@ -322,7 +349,8 @@ class PairNGramAligner:
         while not a_reader.done():
             key = a_reader.get_key()
             fst = converter(a_reader.get_fst())
-            fst.encode(encoder)
+            # Implicit downcast here.
+            fst.encode(encoder)  # type: ignore
             a_writer[key] = self._compactor(fst)
             a_reader.next()
         encoder.write(encoder_path)
@@ -351,10 +379,12 @@ def main(args: argparse.Namespace) -> None:
         args.cores,
         args.random_starts,
         args.seed,
+        args.batch_size,
         args.delta,
+        args.lr,
+        args.max_iters,
         args.fst_default_cache_gc,
         args.fst_default_cache_gc_limit,
-        args.max_iters,
     )
 
 
@@ -407,11 +437,10 @@ if __name__ == "__main__":
         help="number of random starts (default: %(default)s)",
     )
     parser.add_argument("--seed", type=int, required=True, help="random seed")
-    # Unless otherwise marked, all of the following arguments are passed to
-    # lower-level binaries as strings, use `true` as a value to get the normal
-    # boolean interpretation.
-    parser.add_argument("--delta")
+    parser.add_argument("--batch_size", type=int)
+    parser.add_argument("--delta", type=float)
+    parser.add_argument("--lr", type=float)
+    parser.add_argument("--max_iters", type=int)
     parser.add_argument("--fst_default_cache_gc")
     parser.add_argument("--fst_default_cache_gc_limit")
-    parser.add_argument("--max_iters")
     main(parser.parse_args())

@@ -10,6 +10,7 @@ mkdir -p checkpoints
 
 for TRAIN_TSV in "${DATA}/train/"*"_train.tsv"; do
     DEV_TSV="${TRAIN_TSV//train/dev}"
+    TEST_TSV="${TRAIN_TSV//train/test}"
     LANGUAGE="$(basename $TRAIN_TSV _train.tsv)"
     # Output symbols.
     cut -f2 "${TRAIN_TSV}" "${DEV_TSV}" \
@@ -41,6 +42,15 @@ for TRAIN_TSV in "${DATA}/train/"*"_train.tsv"; do
             --gold_path="${DEV_TSV}" \
             --hypo_path="${LANGUAGE}.txt" \
             > "checkpoints/${LANGUAGE}-${ORDER}-dev.res"
+        ./predict \
+            --input_path="${TEST_TSV}" \
+            --fst_path="checkpoints/${LANGUAGE}-${ORDER}.fst" \
+            --output_token_type="${LANGUAGE}_phones.sym" \
+            --output_path="${LANGUAGE}.txt"
+        ./evaluate \
+            --gold_path="${TEST_TSV}" \
+            --hypo_path="${LANGUAGE}.txt" \
+            > "checkpoints/${LANGUAGE}-${ORDER}-test.res"
     done
     rm "${LANGUAGE}_phones.sym" \
         "${LANGUAGE}.enc" \

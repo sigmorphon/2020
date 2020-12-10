@@ -6,41 +6,38 @@ This script assumes the input is provided one example per line."""
 __author__ = "Kyle Gorman"
 
 import argparse
+import functools
 import logging
 import multiprocessing
 
-from typing import Iterator, Union
+from typing import Iterator
 
 import pynini
+from pynini.lib import rewrite
 
-
-TokenType = Union[str, pynini.SymbolTable]
 
 TOKEN_TYPES = ["byte", "utf8"]
 
 
 class Rewriter:
-    """Helper object for rewriting."""
-
     def __init__(
         self,
         fst: pynini.Fst,
-        input_token_type: TokenType,
-        output_token_type: TokenType,
+        input_token_type: pynini.TokenType,
+        output_token_type: pynini.TokenType,
     ):
-        self.fst = fst
-        self.input_token_type = input_token_type
-        self.output_token_type = output_token_type
-
-    def rewrite(self, i: str) -> str:
-        lattice = (
-            pynini.acceptor(i, token_type=self.input_token_type) @ self.fst
+        self.rewrite = functools.partial(
+            rewrite.top_rewrite,
+            rule=fst,
+            input_token_type=input_token_type,
+            output_token_type=output_token_type,
         )
-        if lattice.start() == pynini.NO_STATE_ID:
-            logging.error("Composition failure: %s", i)
+
+    def __call__(self, i: str) -> str:
+        try:
+            return self.rewrite(i)
+        except rewrite.Error:
             return "<composition failure>"
-        lattice.project(True).rmepsilon()
-        return pynini.shortestpath(lattice).string(self.output_token_type)
 
 
 def _reader(path: str) -> Iterator[str]:
@@ -62,9 +59,13 @@ def main(args: argparse.Namespace) -> None:
         if args.output_token_type in TOKEN_TYPES
         else pynini.SymbolTable.read_text(args.output_token_type)
     )
-    rewriter = Rewriter(fst, input_token_type, output_token_type)
+    rewriter = Rewriter(
+        fst,
+        input_token_type=input_token_type,
+        output_token_type=output_token_type,
+    )
     with multiprocessing.Pool(args.cores) as pool:
-        for line in pool.map(rewriter.rewrite, _reader(args.word_path)):
+        for line in pool.map(rewriter, _reader(args.word_path)):
             print(line)
 
 
